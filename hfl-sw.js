@@ -12,7 +12,7 @@
  * plays with no signal. It never touches IndexedDB or localStorage: saves
  * are not this worker's business and it must never eat one.
  */
-var BUILD = 'v84';
+var BUILD = 'v85';
 var CACHE = 'hfl-' + BUILD;
 var BASE = new URL('./', self.location).pathname;   // this directory
 
@@ -22,7 +22,7 @@ var BASE = new URL('./', self.location).pathname;   // this directory
 var CORE = [
   './',
   'index.html',
-  'hfl-v84.html',
+  'hfl-v85.html',
   'manifest.webmanifest',
   'icon-192.png',
   'icon-512.png',
