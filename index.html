@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Historical Football League</title>
+<meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
+<meta name="theme-color" content="#0f1729">
+<style>
+  html,body{height:100%;margin:0;background:#0b1220;color:#e8eefc;
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex;align-items:center;justify-content:center;text-align:center}
+  a{color:#8ab4ff}
+  .w{padding:24px;max-width:32rem}
+  .s{opacity:.7;font-size:14px;margin-top:12px}
+</style>
+<!-- Permanent address for the game. Each release only changes the line below,
+     so a bookmark to this page never goes stale.
+
+     This launcher never unregisters another project's service worker: HFL's
+     own worker is registered at this directory's scope, and a more specific
+     scope always wins, so nothing else on the origin can serve these pages.
+     Storage is untouched — saves stay exactly where they are. -->
+<script>
+  var BUILD = 'hfl-v83.html';
+  function go(){ location.replace(BUILD + location.search + location.hash); }
+  go();
+</script>
+</head>
+<body>
+  <div class="w">
+    <p>Opening the Historical Football League&hellip;</p>
+    <p class="s">If nothing happens, <a href="hfl-v83.html">tap here to open the current build</a>.</p>
+  </div>
+</body>
+</html>

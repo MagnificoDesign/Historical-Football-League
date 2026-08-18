@@ -1,0 +1,16 @@
+{
+  "name": "Historical Football League",
+  "short_name": "HFL",
+  "description": "A 12- or 32-club historical NFL GM, draft and franchise simulation.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1729",
+  "theme_color": "#0f1729",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
