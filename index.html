@@ -1,4 +1,6 @@
 <!doctype html>
+<!-- HFL v203 Clean Handoff: a verified advance closes the offseason
+     and lands on the League tab; no more false verification alarm. -->
 <!-- HFL v202 Honor-System Cap: the owner may advance over the cap;
      AI clubs are still held to it. Roster size and floors stay hard. -->
 <!-- HFL v201 Franchise Unblock: offseason compliance button, honest
@@ -17720,6 +17722,109 @@ function boot(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 G.__HFL_V201={version:'v201-franchise-unblock',
   fixes:['offer-intent','alignment-default','injury-badge','usage-slider','safe-area','gatekeeper','blockers-honesty','contracts-access','roster-compliance','rookie-header']};
+})(globalThis);
+</script>
+
+
+<script id="hfl-v203-clean-handoff">
+/* v203: the season-advance entry point is overridden down a chain
+   (v180 -> v186 -> v187), so wrap whatever is live at load time.
+
+   Two jobs:
+   1. Kill the false alarm. The verifier read the new season the instant the
+      advance resolved, before the store had republished it, so a successful
+      advance drew "Offseason blocked at: post advance verification" over a
+      league that had already started. If the verifier objects, poll for up
+      to four seconds; if the new regular season really is there, it worked.
+   2. Hand off cleanly. On a verified advance, close Offseason HQ, the
+      workbench, the compliance card and any stale banner, then leave the
+      owner on the League tab for the new year. */
+(function(G){
+'use strict';
+function S(){try{return G.__HFL_APP&&G.__HFL_APP.lg&&G.__HFL_APP.lg();}catch(e){return null;}}
+function L(){try{return G.__HFL_APP&&G.__HFL_APP.J&&G.__HFL_APP.J();}catch(e){return null;}}
+function careerYear(){try{var c=G.__HFL_CAREER_LOAD(L().id);return c&&c.year;}catch(e){return null;}}
+
+G.__HFL_V203_HANDOFF=function(){
+  try{
+    ['hfl-offseason-hq','hfl-offseason','hfl-offseason-error','hfl-v201-compliance']
+      .forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+    [].slice.call(document.querySelectorAll('.hfl-os-hq-backdrop,.hfl-v180-blockers,.hfl-v202-cap,[role="alert"]'))
+      .forEach(function(e){if(e&&e.parentNode)e.parentNode.removeChild(e);});
+    [].slice.call(document.querySelectorAll('body > div,body > section'))
+      .forEach(function(e){
+        if(/Offseason blocked at/i.test(e.textContent||'')&&e.parentNode)
+          e.parentNode.removeChild(e);
+      });
+    G.__HFL_V201_LASTREPORT=null;
+  }catch(e){}
+  /* the legacy button reloads on success, so put the hash on League first:
+     with or without that reload, the owner lands on the League tab. */
+  try{location.hash='#/';}catch(e){}
+  try{if(G.__HFL_RT_GO)G.__HFL_RT_GO('/');}catch(e){}
+  try{scrollTo(0,0);}catch(e){}
+};
+
+function started(fromYear){
+  var s=S(),y=careerYear();
+  return !!(s&&s.status==='regular'&&(y==null||y>=fromYear+1));
+}
+
+function wrap(){
+  var live=G.__HFL_V180_START_NEXT_SEASON;
+  if(typeof live!=='function'||live.__v203)return false;
+  var wrapped=async function(){
+    var before=(S()||{}).year||1;
+    var r=await live.apply(this,arguments);
+    if(r&&r.ok===false&&/post-advance|verification/i.test(String(r.stage||'')+String(r.reason||''))){
+      for(var t=0;t<20;t++){
+        if(started(before)){r={ok:true,recoveredBy:'v203-poll'};break;}
+        await new Promise(function(res){setTimeout(res,200);});
+      }
+    }
+    if(r&&r.ok){
+      for(var t2=0;t2<10&&!started(before);t2++)
+        await new Promise(function(res){setTimeout(res,200);});
+      try{G.__HFL_V203_HANDOFF();}catch(e){}
+    }
+    return r;
+  };
+  wrapped.__v203=true;
+  G.__HFL_V180_START_NEXT_SEASON=wrapped;
+  if(G.__HFL_V186_START_NEXT_SEASON)G.__HFL_V186_START_NEXT_SEASON=wrapped;
+  if(G.__HFL_V187_START_NEXT_SEASON)G.__HFL_V187_START_NEXT_SEASON=wrapped;
+  return true;
+}
+/* later layers reassign the same name after we load, so keep re-applying */
+wrap();
+setInterval(wrap,500);
+
+/* Belt and braces: whatever wiring the button ends up with, if a new regular
+   season is live while offseason furniture is still on screen, the advance
+   has already happened - clear it and hand off. */
+var sawComplete=false;
+setInterval(function(){
+  try{
+    var s=S();if(!s)return;
+    if(s.status==='complete'){sawComplete=true;return;}
+    if(s.status!=='regular')return;
+    /* a "blocked" banner is meaningless once a regular season is live */
+    [].slice.call(document.querySelectorAll('[role="alert"],body > div,body > section'))
+      .forEach(function(e){
+        if(/Offseason blocked at/i.test(e.textContent||'')&&e.parentNode)
+          e.parentNode.removeChild(e);
+      });
+    if(!sawComplete)return;
+    /* we watched this league finish a season and then start a new one, so a
+       leftover offseason panel is genuinely stale */
+    var stale=document.getElementById('hfl-offseason-hq')||
+              document.getElementById('hfl-offseason')||
+              document.getElementById('hfl-v201-compliance')||
+              /Offseason blocked at/i.test(document.body.textContent||'');
+    if(stale){sawComplete=false;G.__HFL_V203_HANDOFF();}
+  }catch(e){}
+},400);
+G.__HFL_V203={version:'v203-clean-handoff'};
 })(globalThis);
 </script>
 
