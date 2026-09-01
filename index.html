@@ -1,4 +1,6 @@
 <!doctype html>
+<!-- HFL v200 True Development: players grow THROUGH their draft
+     rating to a hidden per-player peak above it. -->
 <!-- HFL v199 Defensive Stars: sack and tackle credit now follows
      ability - elite defenders post elite stat lines. -->
 <!-- HFL v198 X/Z Roles: the X draws CB1 and is press-tested;
@@ -6146,13 +6148,18 @@ G.__HFL_AGECURVE = function(player, yrs, seed){
   if (s > 0) fall = fall * Math.min(G.__HFL_VETFALL_MAX, 1 + G.__HFL_VETFALL * (s / len));
   var p = yrs / len;
   var delta;
+  // v200: hidden growth ceiling. The listed rating is where a young player
+  // ARRIVES; his peak sits above it, deterministically per player, so equal
+  // draft grades can hide different futures.
+  var boost = Math.max(1.5, 5 + G.__HFL_JIT(String(player.id) + '~dev', 3.5));
   if (p <= peak) {
-    // rise: a young player has not arrived yet
     var rise = (typeof player.rise === 'number') ? player.rise : 5.5;
-    delta = -rise * (1 - p / peak);
+    var q = p / peak;
+    delta = -rise * (1 - q) + boost * q;
   } else {
     var t = (p - peak) / (1 - peak);
-    delta = -fall * t * t;
+    // decline from +boost through zero to the same career-end point as before
+    delta = boost - (fall + boost) * t * t;
   }
   return {len: len, delta: delta, done: yrs >= len};
 };
