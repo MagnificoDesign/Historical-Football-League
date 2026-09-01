@@ -1,4 +1,6 @@
 <!doctype html>
+<!-- HFL v202 Honor-System Cap: the owner may advance over the cap;
+     AI clubs are still held to it. Roster size and floors stay hard. -->
 <!-- HFL v201 Franchise Unblock: offseason compliance button, honest
      blockers, Contracts & Cap access, page-boundary gatekeeper, global
      safe-area, and the root-caused quick fixes from the tally. -->
@@ -6465,11 +6467,13 @@ G.__HFL_TASKLIST = function(league){
       say: 'you are ' + (have - limit) + ' over the ' + limit + '-man limit (' + have + ' on the roster)'});
     if (have < limit) out.push({kind:'under', n: limit - have,
       say: 'you are ' + (limit - have) + ' short of ' + limit + ' men'});
-    // 6. the cap
+    // 6. the cap - v202: honor system. Recorded for display, never a task
+    // that blocks the owner from starting his season.
     try {
       var room = G.__HFL_CAPROOM ? G.__HFL_CAPROOM(league, human) : null;
-      if (room != null && room < -0.0005) out.push({kind:'cap', n: 1,
-        say: 'you are $' + (Math.round(Math.abs(room)*10)/10) + 'M over the cap'});
+      if (room != null && room < -0.0005) G.__HFL_HONOR_CAP_OVER =
+        Math.round(Math.abs(room)*10)/10;
+      else G.__HFL_HONOR_CAP_OVER = 0;
     } catch(e) {}
   } catch(e) {}
   return out;
@@ -6602,11 +6606,8 @@ G.__HFL_TASKCOUNT = function(league){
     // "finished" while the club is over the ceiling for the season being built.
     try {
       var _ss = G.__HFL_APP && G.__HFL_APP.lg && G.__HFL_APP.lg();
-      if (!_ss || _ss.status === 'complete') {
-        var _targetYear = (st.year || 1) + 1;
-        var _ov = G.__HFL_CAP_OVER ? G.__HFL_CAP_OVER(league, _targetYear) : [];
-        for (var _o=0; _o<_ov.length; _o++) if (_ov[_o].team === human) { n += 1; break; }
-      }
+      // v202: honor system - the owner's cap overage is displayed, not counted.
+      if (false) {}
     } catch(e) {}
     return n;
   } catch(e) { return 0; }
@@ -7093,8 +7094,12 @@ G.__HFL_COMPLY = function(league, year, ratingOf, groupOf){
   for (i=0;i<league.players.length;i++) byId[league.players[i].id] = league.players[i];
 
   var released = 0, clubs = 0, freed = 0, _stuck = [];
+  var _ownerId = null;
+  try { _ownerId = G.__HFL_HUMAN_ID(league); } catch(e) {}
   for (var t=0; t<league.teams.length; t++){
     var team = league.teams[t];
+    // v202: honor system - never release the owner's men for cap reasons.
+    if (_ownerId && team.id === _ownerId) continue;
     if (G.__HFL_PAYROLL(league, team.id) <= cap) continue;
     clubs++;
 
@@ -8928,12 +8933,15 @@ G.__HFL_ADVANCE_INNER = async function(F){
         errors:_aiOver.slice(0,8).map(function(o){ return o.team+' is $'+(Math.round((o.payroll-o.cap)*10)/10)+'M over the '+o.cap+'M cap'; }),
         reason:'A computer-controlled club is still over the cap after the offseason solver. Nothing was committed.'};
     }
-    return {ok:false, stage:'cap', year: year,
-      errors: _humanOver.map(function(o){
-        return 'your club is $' + (Math.round((o.payroll - o.cap)*10)/10) +
-               'M over the $' + o.cap + 'M cap'; }),
-      reason: 'Your club is over the cap. Open the offseason and release or trade salary.',
-      needsRepair: true};
+    // v202: the owner's cap is an honor system. A human overage is recorded
+    // and reported, never a refusal; AI clubs (above) are still held to it.
+    if (_humanOver.length){
+      try {
+        G.__HFL_HONOR_CAP_LAST = {year: year,
+          over: _humanOver.map(function(o){
+            return Math.round((o.payroll - o.cap)*10)/10; })[0] || 0};
+      } catch(e) {}
+    }
   }
 
   // ---- v72 COMMIT: one transaction, awaited, then cold-verified ---------
@@ -15756,8 +15764,8 @@ function rosterState(l){
   if(count>lim)blockers.push('Release '+(count-lim)+' player'+(count-lim===1?'':'s')+' ('+count+'/'+lim+').');
   if(count<lim)blockers.push('Add '+(lim-count)+' player'+(lim-count===1?'':'s')+' ('+count+'/'+lim+').');
   if(missing.length)blockers.push('Fill position minimums: '+missing.map(function(x){return x.group;}).join(', ')+'.');
-  if(pay>cap+.0001)blockers.push('Get under the salary cap.');
-  return {count:count,limit:lim,missing:missing,pay:pay,cap:cap,ready:blockers.length===0,blockers:blockers};
+  var capOver=(pay>cap+.0001)?Math.round((pay-cap)*10)/10:0;  /* v202: advisory only */
+  return {count:count,limit:lim,missing:missing,pay:pay,cap:cap,capOver:capOver,ready:blockers.length===0,blockers:blockers};
 }
 G.__HFL_V180_OFFSEASON_STATE=function(){
   var l=L(),s=S();if(!l||!s)return null;var y=fy(s),rs=rosterState(l);
@@ -17470,14 +17478,28 @@ function compliance(reportEl,btn){
     releasePlayer(cands[0],'roster cutdown');
   }
 
-  /* 3. get under the cap */
+  /* 3. get under the cap: shed the EXPENSIVE surplus, not the cheap scrubs,
+     and stop the moment a release stops buying room (dead money).
+     v201.1: the target is not zero - a roster below the limit must still be
+     fillable, so leave headroom for every man legality still requires. */
+  function needRoom(){
+    var short=Math.max(0,limit-mine().length);
+    var miss0=[];try{miss0=G.__HFL_MISSING(l,human)||[];}catch(e){}
+    var floorShort=miss0.reduce(function(a,x){return a+(x.short||1);},0);
+    return Math.max(short,floorShort)*(G.__HFL_MIN_SALARY||0.3);
+  }
   guard=0;
-  while(room()<0&&guard++<25){
+  while(room()<needRoom()&&guard++<30){
     var c2=mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
       .filter(function(p){return releasable(p)&&st.deals[p.id];})
-      .sort(function(a,b){return rate(a)-rate(b);});
+      .sort(function(a,b){return (st.deals[b.id].aav||0)-(st.deals[a.id].aav||0);});
     if(!c2.length)break;
+    var _before=room();
     releasePlayer(c2[0],'cap compliance');
+    if(room()<=_before+0.05){
+      actions.push('Stopped releasing for cap — dead money means further cuts do not create room.');
+      break;
+    }
   }
 
   /* 4. free agents: cover floors, then fill to the limit, cheapest adequate */
@@ -17495,7 +17517,7 @@ function compliance(reportEl,btn){
       .sort(function(a,b){return ask(a)-ask(b)||rate(b)-rate(a);});
     for(var i=0;i<cands.length;i++){
       var p=cands[i],a=ask(p);
-      if(a>Math.max(room(),G.__HFL_MIN_SALARY))continue;
+      if(a>room())continue;   /* v201.1: never sign past the cap */
       var term=1;try{term=G.__HFL_TERM(st.players[p.id],p);}catch(e){}
       st.deals[p.id]={aav:a,yrs:term,left:term,team:human};
       l.picks.push({id:'own-'+year+'-'+p.id,roundIndex:0,pickInRound:0,overall:0,teamId:human,playerId:p.id,
@@ -17528,9 +17550,20 @@ function compliance(reportEl,btn){
     if(!signCheapest(miss[0].group,'position floor'))break;
     try{miss=G.__HFL_MISSING(l,human)||[];}catch(e){miss=[];}
   }
+  var SOFTCAP={QB:3,RB:5,'WR/TE':10,OL:10,'DL/EDGE':10,LB:7,'CB/S':10,K:1,P:1,LS:1};
+  function fillGroup(){
+    /* the unit furthest below a sensible roster shape, specialists capped at 1 */
+    var h=haveByGroup(),best=null,bestGap=0;
+    for(var g in SOFTCAP){
+      var gap=SOFTCAP[g]-(h[g]||0);
+      if(gap>bestGap){bestGap=gap;best=g;}
+    }
+    return best;
+  }
   guard=0;
-  while(mine().length<limit&&guard++<25){
-    if(!signCheapest(null,'roster fill'))break;
+  while(mine().length<limit&&guard++<30){
+    var g2=fillGroup();
+    if(!signCheapest(g2,'roster fill')&&!signCheapest(null,'roster fill'))break;
   }
   /* final floor pass in case the fill crowded a requirement */
   guard=0;try{miss=G.__HFL_MISSING(l,human)||[];}catch(e){miss=[];}
@@ -17543,7 +17576,29 @@ function compliance(reportEl,btn){
   /* stage bookkeeping: expirings resolved means FA is genuinely done */
   markStage(l,year,'fa');
 
-  if(!actions.length)actions.push('Roster was already compliant — nothing to do.');
+  /* v201.1: signings can re-breach the cap; clear it last, then top back up
+     only if that dropped us under the limit and there is room. */
+  guard=0;
+  while(room()<needRoom()&&guard++<30){
+    var c3=mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
+      .filter(function(p){return releasable(p);})
+      .sort(function(a,b){return (st.deals[b.id]?st.deals[b.id].aav:0)-(st.deals[a.id]?st.deals[a.id].aav:0)||rate(a)-rate(b);});
+    if(!c3.length)break;
+    var _b2=room();
+    releasePlayer(c3[0],'final cap compliance');
+    if(room()<=_b2+0.05)break;
+  }
+  guard=0;
+  while(mine().length<limit&&room()>=G.__HFL_MIN_SALARY&&guard++<20){
+    if(!signCheapest(fillGroup(),'roster fill')&&!signCheapest(null,'roster fill'))break;
+  }
+  /* honest closing line: say exactly where the roster stands */
+  var _miss=[];try{_miss=G.__HFL_MISSING(l,human)||[];}catch(e){}
+  var _r=room();
+  actions.push('— Roster '+mine().length+'/'+limit+' · cap room $'+_r+'M'
+    +(_miss.length?' · still short: '+_miss.map(function(x){return x.group;}).join(', '):'')
+    +((mine().length===limit&&_r>=0&&!_miss.length)?' · LEGAL':' · NOT YET LEGAL'));
+  if(actions.length===1)actions.unshift('Roster was already compliant — nothing to do.');
   var summary='ROSTER COMPLIANCE — '+actions.length+' action'+(actions.length===1?'':'s')+':\n'+actions.join('\n');
 
   /* persist through the sanctioned pipeline (legacy adopt pattern) */
@@ -17575,6 +17630,15 @@ function hqAugment(){
   /* #10: one honest blocker list — hide the vague duplicate paragraph */
   var start=steps[3],box=start.querySelector('.hfl-v180-blockers');
   if(box){var p0=start.querySelector('p');if(p0)p0.style.display='none';}
+  /* v202: cap is an honor system for the owner — show where you stand */
+  var over=st.roster&&st.roster.capOver;
+  var adv=start.querySelector('.hfl-v202-cap');
+  if(over>0){
+    if(!adv){adv=document.createElement('div');adv.className='hfl-v202-cap';
+      adv.style.cssText='margin:8px 0 0;padding:9px;border:1px solid #4b3f2a;border-radius:9px;background:#1c1710;color:#f0c46a;font-size:11px;line-height:1.45;';
+      start.appendChild(adv);}
+    adv.textContent='Honor system: your club is $'+over+'M over the cap. You can still start the season — the AI clubs are held to the cap, and you are trusted to keep yourself honest.';
+  } else if(adv) adv.remove();
   /* stage-flag honesty: FA card marked complete while expirings remain */
   if(!st.fa){
     var faStep=steps[0];
