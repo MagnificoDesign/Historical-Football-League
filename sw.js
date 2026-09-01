@@ -1,7 +1,7 @@
 /* HFL service worker — v191 Loop Repair.
    One served build: index.html. Old workers (hfl-sw.js and prior cache
    names) are superseded; activate deletes every foreign cache. */
-const CACHE_NAME='hfl-v203-handoff-v1';
+const CACHE_NAME='hfl-v205-polish-v1';
 const APP_SHELL=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(APP_SHELL)));

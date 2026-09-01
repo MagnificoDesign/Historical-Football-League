@@ -1,4 +1,6 @@
 <!doctype html>
+<!-- HFL v205 Polish: draft overlay scroll lock, clear-league guard,
+     transient render auto-retry, and an alignment guide on the depth page. -->
 <!-- HFL v203 Clean Handoff: a verified advance closes the offseason
      and lands on the League tab; no more false verification alarm. -->
 <!-- HFL v202 Honor-System Cap: the owner may advance over the cap;
@@ -17415,6 +17417,47 @@ function gate(){
   }
 }
 
+/* ============ v204: repair legacy alignment assignments =================
+   Leagues created before v196 had every player assigned to the FIRST spot of
+   his unit (a Guard sitting at OT, an EDGE at DT). v196 seeds correctly but
+   never overwrites, so those saves stayed wrong. Repair exactly that
+   signature - assignment sitting on the unit's first spot while the player's
+   own position is a different spot in the same unit - and leave every
+   deliberate cross-position choice alone. */
+var SPOTS={OL:['OT','OG','C'],'DL/EDGE':['DT','DE','EDGE'],LB:['MIKE','WILL','SAM'],
+  'CB/S':['CB','FS','SS'],'WR/TE':['X','Z','SLOT','TE'],RB:['RB'],FB:['FB'],QB:['QB']};
+var HOME={G:'OG',OT:'OT',C:'C',DT:'DT',NT:'NT',DE:'DE',EDGE:'EDGE',TE:'TE',FB:'FB',
+  CB:'CB',S:'FS',LB:'MIKE',WR:'X',RB:'RB',QB:'QB'};
+function repairAlignments(){
+  try{
+    G.__HFL_V204_RAN=(G.__HFL_V204_RAN||0)+1;
+    if(G.__HFL_V204_REPAIRED)return;
+    var L=J();if(!L||!L.teams||!L.players||!L.players.length)return;
+    var byId={};(L.players||[]).forEach(function(p){byId[p.id]=p;});
+    var fixed=0;
+    L.teams.forEach(function(t){
+      var a=(t.deployment&&t.deployment.assignments)||[];
+      a.forEach(function(x){
+        var p=byId[x.playerId];if(!p)return;
+        var home=HOME[p.primaryPosition];if(!home||home===x.group)return;
+        var unit=(function(){try{return G.__HFL_GRP(p.primaryPosition);}catch(e){return null;}})();
+        var list=SPOTS[unit];
+        if(!list||list.indexOf(home)<0)return;
+        /* only the first-spot default signature, and only full shares */
+        if(x.group===list[0]&&(x.share===100||x.share==null)){x.group=home;fixed++;}
+      });
+    });
+    if(fixed){
+      G.__HFL_V204_REPAIRED=true;
+      if(G.__HFL_COMMIT_USER_MUTATION)G.__HFL_COMMIT_USER_MUTATION({
+        kind:'alignment-repair',validate:function(){return null;},
+        mutate:function(ctx){try{G.__HFL_ADOPT(ctx.league,G.__HFL_CLONE(J()));}catch(e){}}
+      });
+      G.__HFL_V204_FIXED=fixed;
+    } else { G.__HFL_V204_REPAIRED=true; G.__HFL_V204_FIXED=0; }
+  }catch(e){G.__HFL_V204_ERR=String(e&&e.message||e);}
+}
+
 /* ================= #10/#11/#13 OFFSEASON ================================ */
 function osState(){try{return G.__HFL_V180_OFFSEASON_STATE&&G.__HFL_V180_OFFSEASON_STATE();}catch(e){return null;}}
 function flowYear(S){return ((S&&S.year)||1)+1;}
@@ -17450,6 +17493,29 @@ function compliance(reportEl,btn){
     for(var k=l.picks.length-1;k>=0;k--)if(l.picks[k].playerId===p.id&&l.picks[k].teamId===human)l.picks.splice(k,1);
     actions.push('Released '+p.name+' ('+p.primaryPosition+' '+Math.round(rate(p))+') — '+why+'.');
   }
+  /* v204: protect the roster the owner built. A cap cut may only take a man
+     who is BOTH surplus at his position AND poor value for his money - never
+     a starter, never a high-rated player while any cheaper filler exists. */
+  function starterCount(g){
+    var map={QB:1,RB:1,FB:1,'WR/TE':4,OL:5,'DL/EDGE':4,LB:3,'CB/S':4,K:1,P:1,LS:1};
+    return map[g]||2;
+  }
+  function isStarter(p){
+    var g=grp(p.primaryPosition);
+    var peers=mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
+      .filter(function(q){return grp(q.primaryPosition)===g;})
+      .sort(function(a,b){return rate(b)-rate(a);});
+    return peers.indexOf(p)<starterCount(g);
+  }
+  function cutCandidates(){
+    return mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
+      .filter(function(p){return releasable(p)&&!isStarter(p);})
+      .sort(function(a,b){
+        /* worst value first: low rating, high salary */
+        var av=(st.deals[a.id]&&st.deals[a.id].aav)||0.3, bv=(st.deals[b.id]&&st.deals[b.id].aav)||0.3;
+        return (rate(a)/av)-(rate(b)/bv);
+      });
+  }
   var book={};
   try{book=G.__HFL_PRICEBOOK(l,function(q){return rate(q);},function(q){return grp(q.primaryPosition);},year);}catch(e){}
   function ask(p){return Math.round(((book[p.id]||G.__HFL_MIN_SALARY))*10)/10;}
@@ -17458,7 +17524,7 @@ function compliance(reportEl,btn){
   var exp=(tasks.expiring||[]).slice();
   exp.forEach(function(item){
     var p=byId[item.id];if(!p){tasks.expiring=tasks.expiring.filter(function(z){return z.id!==item.id;});return;}
-    var a=ask(p),keep=a<=room()&&rate(p)>=66&&mine().length<=limit;
+    var a=ask(p),keep=(a<=room()&&rate(p)>=60)||isStarter(p);
     if(keep){
       var term=1;try{term=G.__HFL_TERM(st.players[p.id],p);}catch(e){}
       st.deals[p.id]={aav:a,yrs:term,left:term,team:human};
@@ -17475,7 +17541,12 @@ function compliance(reportEl,btn){
   var guard=0;
   while(mine().length>limit&&guard++<25){
     var cands=mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
-      .filter(releasable).sort(function(a,b){return rate(a)-rate(b);});
+      .filter(function(p){return releasable(p)&&!isStarter(p);})
+      .sort(function(a,b){return rate(a)-rate(b);});
+    if(!cands.length){
+      cands=mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
+        .filter(releasable).sort(function(a,b){return rate(a)-rate(b);});
+    }
     if(!cands.length)break;
     releasePlayer(cands[0],'roster cutdown');
   }
@@ -17492,9 +17563,7 @@ function compliance(reportEl,btn){
   }
   guard=0;
   while(room()<needRoom()&&guard++<30){
-    var c2=mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
-      .filter(function(p){return releasable(p)&&st.deals[p.id];})
-      .sort(function(a,b){return (st.deals[b.id].aav||0)-(st.deals[a.id].aav||0);});
+    var c2=cutCandidates().filter(function(p){return st.deals[p.id];});
     if(!c2.length)break;
     var _before=room();
     releasePlayer(c2[0],'cap compliance');
@@ -17539,7 +17608,7 @@ function compliance(reportEl,btn){
     }
     if(!bestG||bestOver<=0)return false;
     var c=mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
-      .filter(function(p){return grp(p.primaryPosition)===bestG;})
+      .filter(function(p){return grp(p.primaryPosition)===bestG&&!isStarter(p);})
       .sort(function(a,b){return rate(a)-rate(b);});
     if(!c.length)return false;
     releasePlayer(c[0],'making room for a required position');
@@ -17582,9 +17651,7 @@ function compliance(reportEl,btn){
      only if that dropped us under the limit and there is room. */
   guard=0;
   while(room()<needRoom()&&guard++<30){
-    var c3=mine().map(function(pk){return byId[pk.playerId];}).filter(Boolean)
-      .filter(function(p){return releasable(p);})
-      .sort(function(a,b){return (st.deals[b.id]?st.deals[b.id].aav:0)-(st.deals[a.id]?st.deals[a.id].aav:0)||rate(a)-rate(b);});
+    var c3=cutCandidates();
     if(!c3.length)break;
     var _b2=room();
     releasePlayer(c3[0],'final cap compliance');
@@ -17708,6 +17775,7 @@ function rookieHead(){
 /* ================= driver =============================================== */
 var timer=null;
 function tick(){clearTimeout(timer);timer=setTimeout(function(){
+  try{repairAlignments();}catch(e){}
   try{gate();}catch(e){}
   try{hqAugment();}catch(e){}
   try{rookieHead();}catch(e){}
@@ -17720,6 +17788,7 @@ function boot(){
   setInterval(tick,900);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+G.__HFL_V204_REPAIR=repairAlignments;   /* manual repair hook */
 G.__HFL_V201={version:'v201-franchise-unblock',
   fixes:['offer-intent','alignment-default','injury-badge','usage-slider','safe-area','gatekeeper','blockers-honesty','contracts-access','roster-compliance','rookie-header']};
 })(globalThis);
@@ -17825,6 +17894,186 @@ setInterval(function(){
   }catch(e){}
 },400);
 G.__HFL_V203={version:'v203-clean-handoff'};
+})(globalThis);
+</script>
+
+<style id="hfl-v205-css">
+body.hfl-v205-locked{overflow:hidden!important;touch-action:none}
+#hfl-v205-guide{margin:14px 0;border:1px solid rgba(226,168,8,.45);border-radius:12px;background:#101a2e;overflow:hidden}
+#hfl-v205-guide .hd{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;gap:10px}
+#hfl-v205-guide .k{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:#e2a808;font-weight:800}
+#hfl-v205-guide .t{font-size:15px;font-weight:800;text-transform:uppercase;color:#f5f2e9}
+#hfl-v205-guide .tog{border:1px solid rgba(255,255,255,.2);background:none;color:#dfe7f5;border-radius:8px;font-size:11px;font-weight:800;padding:7px 11px;text-transform:uppercase;letter-spacing:.05em}
+#hfl-v205-guide .body{display:none;padding:4px 0 8px}
+#hfl-v205-guide.open .body{display:block}
+#hfl-v205-guide .grp{padding:9px 14px;border-top:1px solid rgba(255,255,255,.06)}
+#hfl-v205-guide .gt{font-size:11px;font-weight:800;letter-spacing:.1em;color:#e2a808;text-transform:uppercase;margin-bottom:5px}
+#hfl-v205-guide .row{margin:0 0 7px}
+#hfl-v205-guide .nm{color:#f5f2e9;font-weight:700;font-size:12px}
+#hfl-v205-guide .ds{color:#9fb0c8;font-size:11.5px;line-height:1.5}
+#hfl-v205-guide .at{color:#7fd7ad;font-size:11px}
+</style>
+<script id="hfl-v205-polish">
+/* v205: three field-reported problems plus the position guide.
+   - the rookie/inaugural draft overlay let the page behind it scroll
+   - "Start new league" sat next to the player rows in the draft room
+   - a transient render error after simming playoffs needed a manual retry
+   - nothing in the interface explained what X, Z, SLOT, EDGE or NT mean */
+(function(G){
+'use strict';
+function path(){try{return G.__HFL_RT_PATH?G.__HFL_RT_PATH():'/';}catch(e){return '/';}}
+
+/* ---------- 1. scroll lock while a draft overlay is open --------------- */
+function overlay(){
+  var els=[].slice.call(document.querySelectorAll('div,section'));
+  for(var i=0;i<els.length;i++){
+    var e=els[i],cs;
+    try{cs=getComputedStyle(e);}catch(_e){continue;}
+    if(cs.position!=='fixed')continue;
+    var r=e.getBoundingClientRect();
+    if(r.height<innerHeight*0.5||r.width<innerWidth*0.6)continue;
+    if(/on the clock|players on the board|WAR ROOM|Draft war room/i.test(e.textContent||''))return e;
+  }
+  return null;
+}
+function scrollLock(){
+  var o=overlay();
+  if(o){
+    document.body.classList.add('hfl-v205-locked');
+    /* the panel itself must still scroll */
+    try{
+      var cs=getComputedStyle(o);
+      if(cs.overflowY!=='auto'&&cs.overflowY!=='scroll'){
+        o.style.overflowY='auto';
+        o.style.webkitOverflowScrolling='touch';
+        if(!o.style.maxHeight)o.style.maxHeight='100vh';
+      }
+    }catch(e){}
+  } else {
+    document.body.classList.remove('hfl-v205-locked');
+  }
+}
+
+/* ---------- 2. keep the destructive button away from the board -------- */
+function guardClearLeague(){
+  var inDraft=!!overlay()||/\/draft/.test(path());
+  var btns=[].slice.call(document.querySelectorAll('button,a'));
+  btns.forEach(function(b){
+    var t=(b.textContent||'').trim();
+    if(!/^(Start new league|Clear league|Permanently clear this league)$/i.test(t))return;
+    if(inDraft){
+      /* out of thumb's reach while picks are being made */
+      b.style.display='none';
+      b.dataset.v205Hidden='1';
+    } else if(b.dataset.v205Hidden==='1'){
+      b.style.display='';
+      b.dataset.v205Hidden='';
+    }
+  });
+}
+
+/* ---------- 3. recover the transient render error --------------------- */
+var lastRetry=0;
+function autoRetry(){
+  var t=document.body.textContent||'';
+  if(!/This page didn't load/i.test(t))return;
+  var now=Date.now();
+  if(now-lastRetry<6000)return;          /* never loop */
+  var btn=[].slice.call(document.querySelectorAll('button'))
+    .filter(function(b){return /^Try again$/i.test((b.textContent||'').trim());})[0];
+  if(btn){lastRetry=now;btn.click();}
+}
+
+/* ---------- 4. the position guide on the depth page ------------------- */
+var GUIDE=[
+  ['Receivers',[
+    ['X — split end','Lines up on the line of scrimmage and draws the opponent\u2019s best cover corner. He has to beat press coverage at the snap.',
+      'Leans on: release, contested catch, separation.'],
+    ['Z — flanker','Lines up off the line with a free release, so he gets a runway into his route instead of a jam.',
+      'Leans on: separation, route craft, deep speed.'],
+    ['SLOT','Works inside against the nickel defender, in traffic and on quick timing throws.',
+      'Leans on: route craft, hands, yards after catch.'],
+    ['TE','A receiver who also blocks. An inline tight end whose blocking beats his receiving counts toward pass protection.',
+      'Leans on: run blocking, hands, contested catch.']]],
+  ['Offensive line',[
+    ['OT — tackle','The edges of the line, alone against speed rushers on the outside.',
+      'Leans on: pass blocking, footwork, awareness.'],
+    ['OG — guard','Interior power. Wins the short, violent collisions that open running lanes.',
+      'Leans on: run blocking, strength, anchor.'],
+    ['C — center','Snaps and sets the protection calls; the anchor of interior blocking.',
+      'Leans on: awareness, run blocking, strength.']]],
+  ['Defensive front',[
+    ['DT / NT — interior','Play over the guards and centre. Interior alignments are what hold up against the run.',
+      'Leans on: run defense, strength, shed blocks.'],
+    ['DE — end','A balanced edge: sets the edge against the run and still rushes the passer.',
+      'Leans on: pass rush and run defense together.'],
+    ['EDGE — rusher','A perimeter alignment that exists to hunt the quarterback; less help against inside runs.',
+      'Leans on: pass rush, burst, bend.']]],
+  ['Linebackers',[
+    ['MIKE','The middle linebacker, counted as an interior box defender against the run. Where your tackle leaders come from.',
+      'Leans on: tackling, run defense, awareness.'],
+    ['WILL / SAM','Weak-side and strong-side linebackers, treated as perimeter defenders — more range, more coverage.',
+      'Leans on: coverage, pursuit, tackling.']]],
+  ['Secondary',[
+    ['CB','Outside corner. Your best one draws the opponent\u2019s X receiver.',
+      'Leans on: man coverage, deep speed, press.'],
+    ['FS — free safety','Plays the deep middle as a perimeter defender.',
+      'Leans on: zone coverage, range, ball skills.'],
+    ['SS — strong safety','Plays near the line and counts as a box defender against the run.',
+      'Leans on: tackling, run support, zone coverage.']]]
+];
+function buildGuide(){
+  var box=document.createElement('section');
+  box.id='hfl-v205-guide';
+  var html='<div class="hd"><div><div class="k">Reference</div><div class="t">What the alignments mean</div></div>'
+    +'<button class="tog">Show</button></div><div class="body">'
+    +'<div class="grp"><div class="ds">Where a man lines up changes what the simulator asks of him. '
+    +'Interior alignments hold up against the run; edge alignments rush the passer. '
+    +'These are the spots you can assign in <b>Play him at</b> and <b>Alignment split</b>.</div></div>';
+  GUIDE.forEach(function(sec){
+    html+='<div class="grp"><div class="gt">'+sec[0]+'</div>';
+    sec[1].forEach(function(r){
+      html+='<div class="row"><div class="nm">'+r[0]+'</div><div class="ds">'+r[1]+'</div>'
+        +'<div class="at">'+r[2]+'</div></div>';
+    });
+    html+='</div>';
+  });
+  html+='</div>';
+  box.innerHTML=html;
+  var tog=box.querySelector('.tog');
+  tog.onclick=function(){
+    var open=box.classList.toggle('open');
+    tog.textContent=open?'Hide':'Show';
+  };
+  return box;
+}
+function mountGuide(){
+  if(path()!=='/depth'){var o=document.getElementById('hfl-v205-guide');if(o)o.remove();return;}
+  if(document.getElementById('hfl-v205-guide'))return;
+  var main=document.querySelector('#root main')||document.getElementById('root');
+  if(!main)return;
+  var usage=document.getElementById('hfl-v197-usage');
+  var box=buildGuide();
+  if(usage&&usage.parentNode)usage.parentNode.insertBefore(box,usage);
+  else main.appendChild(box);
+}
+
+var t=null;
+function tick(){clearTimeout(t);t=setTimeout(function(){
+  try{scrollLock();}catch(e){}
+  try{guardClearLeague();}catch(e){}
+  try{autoRetry();}catch(e){}
+  try{mountGuide();}catch(e){}
+},80);}
+function boot(){
+  tick();
+  var r=document.getElementById('root');
+  if(r)new MutationObserver(tick).observe(r,{subtree:true,childList:true});
+  addEventListener('hashchange',tick);addEventListener('popstate',tick);
+  setInterval(tick,700);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+G.__HFL_V205={version:'v205-polish',fixes:['draft-scroll-lock','clear-league-guard','error-auto-retry','alignment-guide']};
 })(globalThis);
 </script>
 
